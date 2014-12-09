@@ -1,0 +1,115 @@
+---
+title: "Identifying the Most Damaging Weather Events in the US (1950-2011)"
+author: "rcquan"
+date: "June 19, 2014"
+output:
+  html_document:
+    theme: spacelab
+---
+#Synopsis
+In this report we aim to describe the type of weather events that are 1) most harmful with respect to population health in the United States and 2) most costly to the United States with respect to economic consequences. Using storm data from the U.S. National Oceanic and Atmospheric Administration
+(NOAA), we measured population health by the number of fatalities and injuries caused and economic consequences by the dollar amount damage done to property and crops. As observed from 1950-2011, we determined the following:
+
+* `Tornadoes` were most harmful to population health, causing about 97,000 counts of fatalities and injuries.
+* `Floods` were most harmful to the economy, causing over 150 billion dollars in damage to property and crops.
+
+#Data Processing
+
+##Getting & Loading Data
+In order to conduct this analysis, we used data from the U.S. National Oceanic
+and Atomspheric Administration's [(NOAA)](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf) storm database. This database tracks characteristics of major storms and weather events in the United States. To manually download the file into the parent directory, you can access the file [here](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2).
+
+The file containing the storm data is compressed using a bz2 algorithm. The data is
+a comma-delimited file. We use `header = TRUE` to read in the header data. Be forewarned
+that this code chunk can take a few minutes to process.
+```{r, cache=TRUE}
+if (!file.exists("storm_data.csv.bz2")){
+        url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+        download.file(url, "storm_data.csv.bz2", method = "curl")
+}
+stormData <- read.csv(bzfile("storm_data.csv.bz2"),sep=",", header = TRUE)
+```
+After reading in the storm data, we check the number of observations (rows) and 
+variables (columns) in this dataset. There are 902,297 rows and 37 columns.
+```{r}
+dim(stormData)
+```
+```{r}
+names(stormData)
+```
+##Determining Harm to Population Health
+We are interested in the `EVTYPE` variable which gives us the weather event responsible
+for the damage. To assess harm to population health, we will be using the `FATALITIES` and
+`INJURIES` variables. Missing values are dropped from the analysis by default. 
+```{r}
+popHealth <- aggregate(FATALITIES + INJURIES ~ EVTYPE, data = stormData, sum)
+names(popHealth) = c("EVENT.TYPE", "FATALITIES.INJURIES")
+popHealth <- popHealth[order(popHealth$FATALITIES.INJURIES, decreasing = TRUE),]
+```
+##Determining Consequences to the Economy
+To assess economic damage, we will be using the `PROPDMG` and `CROPDMG`
+variables. Note that `PROPDMG` and `CROPDMG` have associated variables that denote its
+exponential value: `PROPDMGEXP` and `CROPDMGEXP`, respectively. We make this cost information
+more use for comparison and do this only for values with meaningful exponential
+symbols: `K`, `M`, `B`, and `""` (for none).
+```{r, cache=TRUE}
+# Subset stormData for values ending in meaningful exponent symbols 
+exponentData <- stormData[stormData$PROPDMGEXP %in% c("", "K", "M", "B") & stormData$CROPDMGEXP %in% 
+    c("", "K", "M", "B"), ]
+# Function to apply exponent values to base values
+applyExponent <- function(DMG, EXP) {
+    if (EXP == "K") {
+        DMG * 1000
+    } else if (EXP == "M") {
+        DMG * 1e+06
+    } else if (EXP == "B") {
+        DMG * 1e+09
+    } else if (EXP == "") {
+        DMG
+    } else {
+        stop("NOEXP")
+    }
+}
+# mapply can be used to cycle parameters through a function
+exponentData$PROP_DAMAGE_AMOUNT <- mapply(applyExponent, exponentData$PROPDMG, exponentData$PROPDMGEXP)
+exponentData$CROP_DAMAGE_AMOUNT <- mapply(applyExponent, exponentData$CROPDMG, exponentData$CROPDMGEXP)
+```
+
+Now that we have variables to represent economic consequences with the appropriate magnitude
+we can apply a similar approach as we did with population health to aggregate the cost data
+by `EVTYPE`. We create new variables `PROPERTY.DAMAGE` and `CROP.DAMAGE`.
+
+```{r}
+econConseq <- aggregate(PROP_DAMAGE_AMOUNT + CROP_DAMAGE_AMOUNT ~ EVTYPE, data = exponentData, sum)
+names(econConseq) <- c("EVENT.TYPE", "PROPERTY.CROP.DAMAGE")
+econConseq <- econConseq[order(econConseq$PROPERTY.CROP.DAMAGE, decreasing = TRUE),]
+```
+
+#Results
+
+##Harm to Population Health
+```{r PopHealth Plot}
+# Reorder factor levels to get highest # of fatalities/injuries on top
+library(lattice)
+barchart(reorder(EVENT.TYPE, FATALITIES.INJURIES) ~ FATALITIES.INJURIES, 
+         data = head(popHealth,10),
+         main = "U.S. Casualties by Top 10 Weather Event Types",
+         xlab = "Casualties (Fatalities & Injuries)",
+         ylab = "Weather Event Type",
+         col = "dark grey")
+```
+
+From 1950-2011 in the United States, `tornadoes` by far cause the most harm to population health with respect to fatalities and injuries caused at 96,979 people.
+
+##Economic Consequences
+```{r EconPlot}
+library(lattice)
+barchart(reorder(EVENT.TYPE, PROPERTY.CROP.DAMAGE) ~ PROPERTY.CROP.DAMAGE/10^6,
+         data = head(econConseq,10),
+         main = "Crop & Property Damage by Top 10 Weather Event Types",
+         xlab = "Property & Crop Damage (in Millions US Dollars)",
+         ylab = "Weather Event Type",
+         col = "dark grey")
+```
+
+From 1950-2011 in the United States, `floods` cause the most economic damage with respect to damage to property and crops at $150,319,678,257 billion.

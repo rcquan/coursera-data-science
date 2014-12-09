@@ -1,0 +1,119 @@
+---
+title: "Predicting the Quality of Weight Lifting Exercises"
+author: "rcquan"
+date: "June 20, 2014"
+output: html_document
+---
+## Synopsis
+
+Is it possible to predict the quality of weight lifting exercises from accelerometer data? In this report we will be using data from accelerometers on the belt, forearm, arm, and dumbell of 6 individuals to construct a model that will be able to accurately classify barbell lifts into one of the 5 following classes:
+
+* Exactly according to the specification (Class A)
+* Throwing the elbows to the front (Class B)
+* Lifting the dumbbell only halfway (Class C)
+* Lowering the dumbbell only halfway (Class D) 
+* Throwing the hips to the front (Class E)
+
+To construct our model, we will be using data from the following [Weight Lifting Exercise Dataset](http://groupware.les.inf.puc-rio.br/har). 
+
+## Data Processing
+
+### Loading Data
+```{r LoadData, cache=TRUE}
+urlTrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if(!file.exists("pml-training.csv")){
+        download.file(urlTrain, "pml-training.csv", method = "curl")
+}
+training <- read.csv("pml-training.csv")
+
+urlTest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists("pml-testing.csv")){
+        download.file(urlTest, "pml-testing.csv", method = "curl")
+}
+testing <- read.csv("pml-testing.csv")
+```
+```{r}
+dim(training); dim(testing)
+```
+## Pre-processing
+
+Not all of the variables in this dataset will be useful predictors in our model. To prune our dataset in preparation for building our model, we devise the following strategy for the removal of predictors:
+
+* When the variable does not appear to be a sensor reading.
+* When it is unclear how a variable is measured.
+* When the vast majority of values for the variable are missing.
+* When a variable is related to the sequence of the experiments, such that it predicts `classe`.
+* ID information such as study id and name that has no predictive value
+* Any measurements of time, with the assumption that quality is consistent across the relatively short window frames.
+
+```{r RemovingFeatures}
+# Removing features that have mostly missing values
+removeMiss <- function(data){
+        words <- c("kurtosis", "var", "skewness", "stddev", "avg", "amplitude", "min", "max")
+        index <- c()
+        for(word in words){
+                index <- append(index, grep(word, names(data)))
+        }
+        ts <- data[,-index]
+        return(ts)
+}
+tr <- removeMiss(training)
+ts <- removeMiss(testing)
+# Removing features with ID information and time
+names(tr[,c(1:7)])
+tr <- tr[,-c(1:7)]
+ts <- ts[,-c(1:7)]
+
+dim(tr); dim(ts)
+```
+
+Using this strategy, we have reduced the dimensions of this data frame down to 53 predictors. These include the roll, pitch, yaw, total acceleration, gyroscopic
+position, acceleration, and magnet for accelerometers on belt, forearm, arm, and dumbell.
+
+## Model Building
+
+### Data Partitioning
+
+Here we partition the training data into random subsamples such that 70%
+goes to a new training set and 30% goes to the cross-validation data set. 
+
+```{r, message = FALSE, warning = FALSE}
+library(caret)
+set.seed(3234)
+inTrain <- createDataPartition(tr$classe, p = 0.7, list = FALSE)
+train <- tr[inTrain,]
+test <- tr[-inTrain,]
+```
+
+### Model Fit
+
+We then train a model using the `Random Forests` algorithm. We use the `trControl` option and pass a `trainControl` object to override the default bootstrapping method, which consumes a lot of resources. Instead, we use the more efficient k-fold cross-validation to subsample the data with 4 folds.
+
+```{r, cache=TRUE, messages = FALSE}
+set.seed(3234)
+modelFit <- train(classe ~ ., data = train,
+                  method = "rf",
+                  trControl = trainControl(method = "cv", number = 4))
+```
+
+## Cross-Validation
+
+### Out of Sample Error
+
+We use cross-validaiton to estimate our model's out of sample error. Using our cross-validation data set we partitioned earlier, we predict `classe` with our final model and compare the results to the true outcome. We report the out of sample error using the `confusionMatrix` function. 
+
+```{r, message = FALSE, warning=FALSE}
+library(randomForest)
+pred <- predict(modelFit$finalModel, newdata = test)
+confusionMatrix(test$classe, pred)
+```
+
+Using accuracy as our out of sample error estimate, we expect to have an accuracy of **99.24%**.
+
+### Prediction for Original Test Set
+
+We now use our model on the original test set to see how well our model predicts the `classe` outcome for each observation. This will allow us to answer our original question: is it possible to predict the quality of weight lifting exercises from accelerometer data? 
+
+```{r}
+predict(modelFit$finalModel, newdata = ts)
+```
